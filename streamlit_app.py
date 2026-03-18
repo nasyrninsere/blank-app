@@ -1,120 +1,169 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
+
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
+from utils.data_loader import load_data, compute_kpi
 
-# 1. 페이지 기본 설정 (반드시 코드 최상단에 위치해야 합니다)
+# ── 페이지 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="SAYOUNG 비즈니스 대시보드", 
-    page_icon="🌊", 
-    layout="wide", # 화면을 넓게 사용
-    initial_sidebar_state="expanded"
+    page_title="SAYOUNG 비즈니스 대시보드",
+    page_icon="🌊",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# 2. 데이터 생성 및 캐싱 (성능 최적화를 위해 캐시 사용)
-@st.cache_data
-def load_data():
-    # 시연을 위한 가상 데이터 생성
-    dates = pd.date_range(start="2026-01-01", end="2026-03-18")
-    data = pd.DataFrame({
-        '날짜': dates,
-        '방문자수': np.random.randint(50, 300, size=len(dates)),
-        '매출액': np.random.randint(500000, 3000000, size=len(dates)),
-        '인기메뉴': np.random.choice(
-            ['시그니처 샌드 커피', '아메리카노', '레몬 머랭 파이', '피칸 파이'], 
-            size=len(dates)
-        ),
-        '지점': '광안리 본점'
-    })
-    return data
+# ── 커스텀 CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* KPI 카드 */
+[data-testid="stMetric"] {
+    background: #ffffff;
+    border: 1px solid #e0e8f0;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 2px 8px rgba(0,119,182,0.08);
+}
+[data-testid="stMetricLabel"] { font-size: 0.85rem; color: #5a7fa0; }
+[data-testid="stMetricValue"] { font-size: 1.6rem; font-weight: 700; color: #0077B6; }
+/* 사이드바 헤더 */
+section[data-testid="stSidebar"] h2 { color: #0077B6; }
+/* 페이지 타이틀 */
+h1 { color: #0077B6 !important; letter-spacing: -0.5px; }
+/* 구분선 */
+hr { border-color: #e0e8f0; }
+/* 네비게이션 카드 */
+.nav-card {
+    background: linear-gradient(135deg, #0077B6 0%, #00B4D8 100%);
+    border-radius: 12px;
+    padding: 20px;
+    color: white;
+    text-align: center;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    box-shadow: 0 4px 12px rgba(0,119,182,0.25);
+}
+</style>
+""", unsafe_allow_html=True)
 
+# ── 데이터 로드 ───────────────────────────────────────────────────────────────
 df = load_data()
 
-# 3. 사이드바 구성 (필터링 및 제어)
+# ── 사이드바 ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("⚙️ 대시보드 설정")
-    
-    # 날짜 범위 선택
-    min_date = df['날짜'].min()
-    max_date = df['날짜'].max()
-    date_range = st.date_input("조회 기간을 선택하세요", [min_date, max_date])
-    
-    # 메뉴 다중 선택 필터
-    unique_menus = df['인기메뉴'].unique()
-    selected_menu = st.multiselect("메뉴 필터", unique_menus, default=unique_menus)
+    st.image("https://img.icons8.com/color/96/000000/ocean.png", width=64)
+    st.markdown("## ⚙️ 대시보드 설정")
+    st.divider()
 
-# 4. 데이터 필터링 로직
-if len(date_range) == 2:
-    start_date, end_date = date_range
-    # 선택된 날짜와 메뉴에 맞춰 데이터 프레임 필터링
-    mask = (
-        (df['날짜'].dt.date >= start_date) & 
-        (df['날짜'].dt.date <= end_date) & 
-        (df['인기메뉴'].isin(selected_menu))
+    # 지점 선택
+    all_branches = ["전체"] + sorted(df["지점"].unique().tolist())
+    selected_branch = st.selectbox(
+        "🏪 지점 선택",
+        all_branches,
+        key="home_branch",
     )
-    filtered_df = df[mask]
+
+    # 날짜 범위
+    min_date = df["날짜"].dt.date.min()
+    max_date = df["날짜"].dt.date.max()
+    date_range = st.date_input("📅 조회 기간", [min_date, max_date], key="home_date")
+
+    # 빠른 기간 단축버튼
+    st.markdown("**빠른 기간 선택**")
+    col_a, col_b = st.columns(2)
+    if col_a.button("이번 달", use_container_width=True):
+        st.session_state["home_date"] = [
+            pd.Timestamp("2026-03-01").date(), max_date
+        ]
+    if col_b.button("전체 기간", use_container_width=True):
+        st.session_state["home_date"] = [min_date, max_date]
+
+    st.divider()
+    st.caption("🔄 데이터는 5분마다 자동 갱신됩니다.")
+
+# ── 데이터 필터링 ─────────────────────────────────────────────────────────────
+if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+    start_d, end_d = date_range
 else:
-    filtered_df = df
+    start_d, end_d = min_date, max_date
 
-# 5. 메인 화면 구성
+mask = (df["날짜"].dt.date >= start_d) & (df["날짜"].dt.date <= end_d)
+if selected_branch != "전체":
+    mask &= df["지점"] == selected_branch
+filtered_df = df[mask]
+
+# 이전 기간 (같은 일 수)
+period_days = (end_d - start_d).days
+prev_end = start_d - pd.Timedelta(days=1)
+prev_start = prev_end - pd.Timedelta(days=period_days)
+prev_mask = (df["날짜"].dt.date >= prev_start) & (df["날짜"].dt.date <= prev_end)
+if selected_branch != "전체":
+    prev_mask &= df["지점"] == selected_branch
+prev_df = df[prev_mask]
+
+# ── 메인 화면 ─────────────────────────────────────────────────────────────────
 st.title("🌊 SAYOUNG 비즈니스 대시보드")
-st.markdown("광안리 본점의 실시간 방문자 및 매출 데이터를 시각화한 대시보드입니다.")
+branch_label = selected_branch if selected_branch != "전체" else "전체 지점"
+st.markdown(
+    f"**{branch_label}** | {start_d.strftime('%Y.%m.%d')} ~ {end_d.strftime('%Y.%m.%d')} "
+    f"*({period_days + 1}일)*"
+)
 st.divider()
 
-# 6. 핵심 지표 (KPI) - 컬럼 레이아웃 활용
-col1, col2, col3 = st.columns(3) # 화면을 3분할
-
-with col1:
-    st.metric(
-        label="총 방문자수", 
-        value=f"{filtered_df['방문자수'].sum():,}명", 
-        delta="12%" # 전일/전월 대비 증감률 표현
-    )
-with col2:
-    st.metric(
-        label="총 매출액", 
-        value=f"₩{filtered_df['매출액'].sum():,}", 
-        delta="8%"
-    )
-with col3:
-    st.metric(
-        label="일평균 매출", 
-        value=f"₩{int(filtered_df['매출액'].mean()):,}", 
-        delta="-2%"
-    )
+# ── KPI 5개 ───────────────────────────────────────────────────────────────────
+kpi = compute_kpi(filtered_df, prev_df)
+kpi_keys = list(kpi.keys())
+cols = st.columns(5)
+for i, col in enumerate(cols):
+    label = kpi_keys[i]
+    value, delta = kpi[label]
+    col.metric(label=label, value=value, delta=delta)
 
 st.divider()
 
-# 7. 탭(Tabs)을 활용한 다중 뷰 구성
-tab1, tab2, tab3 = st.tabs(["📈 트렌드 분석", "🥧 메뉴별 점유율", "📋 상세 데이터"])
+# ── 빠른 요약 차트 ────────────────────────────────────────────────────────────
+import plotly.express as px
 
-with tab1:
-    st.subheader("일자별 매출 추이")
-    # Plotly를 사용한 반응형 인터랙티브 차트
-    fig_line = px.line(
-        filtered_df, 
-        x='날짜', 
-        y='매출액', 
-        markers=True,
-        line_shape='spline' # 곡선 형태로 부드럽게 표현
+c1, c2 = st.columns([3, 2])
+
+with c1:
+    st.subheader("📈 일별 매출 추이 (전체 지점)")
+    day_sales = (
+        filtered_df.groupby(["날짜", "지점"])["매출액"].sum().reset_index()
     )
-    # use_container_width=True 로 화면 크기에 맞춰 차트 자동 조절
-    st.plotly_chart(fig_line, use_container_width=True) 
-
-with tab2:
-    st.subheader("인기 메뉴 판매 비중")
-    menu_counts = filtered_df['인기메뉴'].value_counts().reset_index()
-    menu_counts.columns = ['메뉴', '판매일수']
-    
-    fig_pie = px.pie(
-        menu_counts, 
-        values='판매일수', 
-        names='메뉴', 
-        hole=0.4 # 도넛 형태의 차트
+    fig = px.line(
+        day_sales, x="날짜", y="매출액", color="지점",
+        color_discrete_sequence=["#0077B6", "#00B4D8", "#023E8A"],
+        markers=True, line_shape="spline",
     )
-    st.plotly_chart(fig_pie, use_container_width=True)
+    fig.update_layout(
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.1),
+        plot_bgcolor="white", paper_bgcolor="white",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-with tab3:
-    st.subheader("상세 데이터 표")
-    # 정렬 및 크기 조절이 가능한 인터랙티브 데이터프레임
-    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+with c2:
+    st.subheader("🏪 지점별 매출 비중")
+    branch_sales = filtered_df.groupby("지점")["매출액"].sum().reset_index()
+    fig2 = px.pie(
+        branch_sales, values="매출액", names="지점",
+        hole=0.45,
+        color_discrete_sequence=["#0077B6", "#00B4D8", "#023E8A"],
+    )
+    fig2.update_traces(textposition="outside", textinfo="percent+label")
+    fig2.update_layout(showlegend=False, paper_bgcolor="white")
+    st.plotly_chart(fig2, use_container_width=True)
+
+st.divider()
+
+# ── 네비게이션 안내 ────────────────────────────────────────────────────────────
+st.subheader("📂 상세 분석 페이지")
+st.markdown("왼쪽 사이드바에서 원하는 분석 페이지를 선택하세요.")
+
+nc1, nc2, nc3, nc4 = st.columns(4)
+nc1.markdown('<div class="nav-card">📈<br>트렌드 분석<br><small>매출·방문자 추이,<br>이동평균, 캔들스틱</small></div>', unsafe_allow_html=True)
+nc2.markdown('<div class="nav-card">🥧<br>메뉴 분석<br><small>메뉴 랭킹, 선버스트,<br>시간대 히트맵</small></div>', unsafe_allow_html=True)
+nc3.markdown('<div class="nav-card">👥<br>고객 분석<br><small>상관관계, 퍼널,<br>날씨 영향도</small></div>', unsafe_allow_html=True)
+nc4.markdown('<div class="nav-card">📋<br>데이터 관리<br><small>목표 설정, 원본 조회,<br>CSV 다운로드</small></div>', unsafe_allow_html=True)
