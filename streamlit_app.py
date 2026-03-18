@@ -14,7 +14,7 @@ from datetime import date
 # 1. 페이지 및 공통 설정
 # =====================================================================
 st.set_page_config(
-    page_title="SAYOUNG 비즈니스 대시보드",
+    page_title="CAFE SAYOUNG 비즈니스 대시보드",
     page_icon="🌊",
     layout="wide",
     initial_sidebar_state="expanded",
